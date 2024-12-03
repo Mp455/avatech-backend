@@ -127,6 +127,7 @@ app.post("/login", async (req, res) => {
 const dbUser = process.env.DB_USER;
 const dbPassword = process.env.DB_PASSWORD;
 const secret = process.env.SECRET;
+const dbName = process.env.DB_NAME;
 
 if (!dbUser || !dbPassword || !secret) {
   console.error("Variáveis de ambiente não configuradas corretamente!");
@@ -135,7 +136,7 @@ if (!dbUser || !dbPassword || !secret) {
 
 mongoose
   .connect(
-    `mongodb+srv://${dbUser}:${dbPassword}@cluster0.u9hok.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
+    `mongodb+srv://${dbUser}:${dbPassword}@cluster0.u9hok.mongodb.net/${dbName}?retryWrites=true&w=majority`
   )
   .then(() => {
     const PORT = process.env.PORT || 3333;
