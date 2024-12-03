@@ -3,31 +3,18 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
 
 const app = express();
-const cors = require("cors");
-app.use(express.json());
-app.use(cors());
 
-//models
+// Middlewares
+app.use(express.json());
+app.use(cors({ origin: "*" }));
+
+// Models
 const User = require("./models/User");
 
-//rota privada
-app.get("/protected", checkToken, async (req, res) => {
-  try {
-    const userId = req.userId;
-    const user = await User.findById(userId, "-password");
-
-    if (!user) {
-      return res.status(404).json({ msg: "Usuário não encontrado!" });
-    }
-
-    res.status(200).json({ user });
-  } catch (error) {
-    res.status(500).json({ msg: "Erro no servidor" });
-  }
-});
-
+// Middleware para verificar o token
 function checkToken(req, res, next) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -39,123 +26,124 @@ function checkToken(req, res, next) {
   try {
     const secret = process.env.SECRET;
     const decoded = jwt.verify(token, secret);
-
     req.userId = decoded.id;
-
     next();
   } catch (error) {
-    console.log(error);
+    console.error(error);
     return res.status(400).json({ msg: "Token inválido!" });
   }
 }
 
-//rota pública
+// Rotas públicas
 app.get("/", (req, res) => {
   res.status(200).json({ msg: "OK" });
 });
 
-//regitrar usuário
+// Rota privada
+app.get("/protected", checkToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = await User.findById(userId, "-password");
+
+    if (!user) {
+      return res.status(404).json({ msg: "Usuário não encontrado!" });
+    }
+
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ msg: "Erro no servidor" });
+  }
+});
+
+// Registrar usuário
 app.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
 
-  if (!username) {
-    return res.status(422).json({ msg: "O nome é obrigatório!" });
+  if (!username || !email || !password) {
+    return res
+      .status(422)
+      .json({ msg: "Preencha todos os campos obrigatórios!" });
   }
-  if (!email) {
-    return res.status(422).json({ msg: "O e-mail é obrigatório!" });
-  }
-
-  if (!password) {
-    return res.status(422).json({ msg: "A senha é obrigatória!" });
-  }
-
-  //checkar se usuário já existe
-  const userExists = await User.findOne({ email: email });
-
-  if (userExists) {
-    return res.status(422).json({ msg: "Por favor, utilize outro e-mail!" });
-  }
-
-  const salt = await bcrypt.genSalt(12);
-  const passwordHash = await bcrypt.hash(password, salt);
-
-  //Criar usuário
-  const user = new User({
-    username,
-    email,
-    password: passwordHash,
-  });
 
   try {
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(422).json({ msg: "Por favor, utilize outro e-mail!" });
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    const user = new User({
+      username,
+      email,
+      password: passwordHash,
+    });
+
     await user.save();
-    res.status(201).json({
-      msg: "Usuário criado com sucesso!",
-    });
+    res.status(201).json({ msg: "Usuário criado com sucesso!" });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      msg: "Aconteceu um erro no servidor, por favor, tente novamente mais tarde",
-    });
+    console.error(error);
+    res
+      .status(500)
+      .json({ msg: "Erro no servidor. Tente novamente mais tarde." });
   }
 });
 
-//Login
-
+// Login
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email) {
-    return res.status(422).json({ msg: "O e-mail é obrigatório!" });
+  if (!email || !password) {
+    return res.status(422).json({ msg: "E-mail e senha são obrigatórios!" });
   }
-
-  if (!password) {
-    return res.status(422).json({ msg: "A senha é obrigatória!" });
-  }
-
-  //checkar se usuário já existe
-  const user = await User.findOne({ email: email });
-
-  if (!user) {
-    return res.status(404).json({ msg: "Usuário não encontrado!" });
-  }
-
-  const checkPassword = await bcrypt.compare(password, user.password);
-
-  if (!checkPassword) {
-    return res.status(422).json({ msg: "Senha inválida!" });
-  }
-
-  //Logar usuário
 
   try {
-    const secret = process.env.SECRET;
+    const user = await User.findOne({ email });
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-      },
-      secret
-    );
+    if (!user) {
+      return res.status(404).json({ msg: "Usuário não encontrado!" });
+    }
+
+    const checkPassword = await bcrypt.compare(password, user.password);
+    if (!checkPassword) {
+      return res.status(422).json({ msg: "Senha inválida!" });
+    }
+
+    const secret = process.env.SECRET;
+    const token = jwt.sign({ id: user.id }, secret, { expiresIn: "1h" });
 
     res.status(200).json({ msg: "Autenticação realizada com sucesso!", token });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      msg: "Aconteceu um erro no servidor, por favor, tente novamente mais tarde",
-    });
+    console.error(error);
+    res
+      .status(500)
+      .json({ msg: "Erro no servidor. Tente novamente mais tarde." });
   }
 });
 
-//credenciais
-const dbuser = process.env.DB_USER;
-const dbpassword = process.env.DB_PASSWORD;
+// Conexão com MongoDB
+const dbUser = process.env.DB_USER;
+const dbPassword = process.env.DB_PASSWORD;
+const secret = process.env.SECRET;
+
+if (!dbUser || !dbPassword || !secret) {
+  console.error("Variáveis de ambiente não configuradas corretamente!");
+  process.exit(1);
+}
 
 mongoose
   .connect(
-    `mongodb+srv://${dbuser}:${dbpassword}@cluster0.u9hok.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
+    `mongodb+srv://${dbUser}:${dbPassword}@cluster0.u9hok.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
   )
   .then(() => {
-    app.listen(3333);
-    console.log("Conectou ao banco!");
+    const PORT = process.env.PORT || 3333;
+    app.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+      console.log("Conectado ao MongoDB!");
+    });
   })
-  .catch((err) => console.log(err));
+  .catch((error) => {
+    console.error("Erro ao conectar ao MongoDB:", error);
+  });
